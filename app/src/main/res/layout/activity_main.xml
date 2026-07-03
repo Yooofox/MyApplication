@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/main"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp"
+    android:fitsSystemWindows="true"
+    tools:ignore="HardcodedText">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="GPS 定位与卫星状态"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="12dp"/>
+
+    <!-- 基础定位数据面板 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="#EFEFEF"
+        android:padding="8dp">
+
+        <TextView android:id="@+id/tvLocation" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="坐标: 搜索中..." android:textSize="16sp" android:fontFamily="monospace"/>
+        <TextView android:id="@+id/tvAltitude" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="海拔: 搜索中..." android:textSize="16sp" android:fontFamily="monospace"/>
+        <TextView android:id="@+id/tvAccuracy" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="精度: 搜索中..." android:textSize="16sp" android:fontFamily="monospace"/>
+        <TextView android:id="@+id/tvSatCount" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="卫星数量 (可见/参与定位): 0 / 0" android:textSize="16sp" android:fontFamily="monospace" android:textStyle="bold" android:layout_marginTop="8dp"/>
+    </LinearLayout>
+
+    <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#CCCCCC" android:layout_marginTop="12dp" android:layout_marginBottom="12dp"/>
+
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="卫星详细参数列表:" android:textStyle="bold" android:layout_marginBottom="8dp"/>
+
+    <!-- 卫星详情列表 (支持滚动) -->
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
+        <TextView
+            android:id="@+id/tvSatDetails"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="等待卫星信号...\n(请在室外空旷处测试)"
+            android:textSize="14sp"
+            android:fontFamily="monospace"/>
+    </ScrollView>
+
+</LinearLayout>
