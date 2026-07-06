@@ -1,3 +1,4 @@
+@file:Suppress("UnstableApiUsage")
 pluginManagement {
     repositories {
         // 插入阿里云镜像
@@ -16,7 +17,7 @@ dependencyResolutionManagement {
         // 插入阿里云镜像
         maven { url = uri("https://maven.aliyun.com/repository/google") }
         maven { url = uri("https://maven.aliyun.com/repository/public") }
-        
+        maven { url = uri("https://jitpack.io") }
         google()
         mavenCentral()
     }

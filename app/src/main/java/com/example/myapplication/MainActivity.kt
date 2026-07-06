@@ -1,176 +1,296 @@
 package com.example.myapplication
 
-import android.Manifest
-import android.annotation.SuppressLint
-import android.content.Context
-import android.content.pm.PackageManager
-import android.location.GnssStatus
-import android.location.Location
-import android.location.LocationListener
-import android.location.LocationManager
+import android.content.ContentValues
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.ImageDecoder
+import android.graphics.Paint
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
+import android.graphics.Rect
+import android.graphics.RectF
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.MediaStore
+import android.widget.Button
+import android.widget.ImageView
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
-import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.app.ActivityCompat
-import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
-import java.util.Locale
+import com.canhub.cropper.CropImageContract
+import com.canhub.cropper.CropImageContractOptions
+import com.canhub.cropper.CropImageOptions
+import com.canhub.cropper.CropImageView
+import java.io.OutputStream
 
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var locationManager: LocationManager
-    private lateinit var tvLocation: TextView
-    private lateinit var tvSatDetails: TextView
+    private lateinit var ivResult: ImageView
+    private lateinit var tvImageInfo: TextView
 
-    private val allPermissionsRequestCode = 999
+    // 图层数据存储
+    private var layerA_Cropped: Bitmap? = null
+    private var layerA_Background: Bitmap? = null
+    private var layerB_Direct: Bitmap? = null
+    private var layer_StaticBackground: Bitmap? = null
+    private var compositeBitmap: Bitmap? = null
 
-    private val basePermissions = mutableListOf(
-        Manifest.permission.ACCESS_FINE_LOCATION,
-        Manifest.permission.ACCESS_COARSE_LOCATION,
-        Manifest.permission.CAMERA,
-        Manifest.permission.RECORD_AUDIO,
-        Manifest.permission.READ_CONTACTS,
-        Manifest.permission.READ_PHONE_STATE,
-        Manifest.permission.READ_SMS,
-        Manifest.permission.READ_CALENDAR,
-        Manifest.permission.READ_MEDIA_IMAGES,
-        Manifest.permission.READ_MEDIA_VIDEO,
-        Manifest.permission.READ_MEDIA_AUDIO,
-        Manifest.permission.BODY_SENSORS,
-        Manifest.permission.ACTIVITY_RECOGNITION
-    )
+    // 选择状态
+    private var isA_BackgroundActive = false
+    private var hasLayerB = false
+    private var hasStaticBackground = false
+    private var isScaleBToA = true
 
-    @SuppressLint("SetTextI18n")
+    // 复用 Paint
+    private val clearPaint = Paint().apply {
+        xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR)
+        isAntiAlias = true
+    }
+    private val filterPaint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
+
+    // 1. 图层 A 选择 (裁切模式)
+    private val pickImageA = registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        uri?.let { startAdvancedCropper(it) }
+    }
+
+    private val cropImageA = registerForActivityResult(CropImageContract()) { result ->
+        if (result.isSuccessful) {
+            val uriOriginal = result.originalUri
+            val cropRect = result.cropRect
+            if (uriOriginal != null && cropRect != null) {
+                val original = loadBitmapFromUri(uriOriginal)
+                original?.let { 
+                    releaseLayerA()
+                    layerA_Cropped = extractFullSizeCroppedLayer(it, cropRect)
+                    layerA_Background = extractBackgroundLayer(it, cropRect)
+                    updateCompositeView()
+                    showToast(getString(R.string.toast_layer_a_ready))
+                }
+            }
+        }
+    }
+
+    // 2. 静态背景图选择 (绝对底层)
+    private val pickStaticBackground = registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        uri?.let {
+            val bitmap = loadBitmapFromUri(it)
+            if (bitmap != null) {
+                layer_StaticBackground?.recycle()
+                layer_StaticBackground = bitmap
+                hasStaticBackground = true
+                updateCompositeView()
+                showToast("静态背景已设置")
+            }
+        }
+    }
+
+    // 3. 图层 B 选择 (直接加载)
+    private val pickImageB = registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        uri?.let { 
+            val bitmap = loadBitmapFromUri(it)
+            if (bitmap != null) {
+                layerB_Direct?.recycle()
+                layerB_Direct = bitmap
+                hasLayerB = true
+                updateCompositeView()
+                showToast(getString(R.string.toast_layer_b_ready))
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
         setContentView(R.layout.activity_main)
 
-        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main)) { v, insets ->
+        initViews()
+        setupEdgeToEdge()
+    }
+
+    private fun initViews() {
+        ivResult = findViewById(R.id.ivResult)
+        tvImageInfo = findViewById(R.id.tvImageInfo)
+        val btnToggleScale = findViewById<Button>(R.id.btnToggleScaleMode)
+        
+        findViewById<Button>(R.id.btnSelectImage1).setOnClickListener { pickImageA.launch("image/*") }
+        findViewById<Button>(R.id.btnSetBackground).setOnClickListener { pickStaticBackground.launch("image/*") }
+        findViewById<Button>(R.id.btnSelectImage2).setOnClickListener { pickImageB.launch("image/*") }
+        
+        findViewById<Button>(R.id.btnLayerA_Cropped).setOnClickListener { 
+            isA_BackgroundActive = false
+            updateCompositeView()
+        }
+        findViewById<Button>(R.id.btnLayerA_Background).setOnClickListener { 
+            isA_BackgroundActive = true
+            updateCompositeView()
+        }
+        
+        btnToggleScale.setOnClickListener {
+            isScaleBToA = !isScaleBToA
+            btnToggleScale.text = if (isScaleBToA) getString(R.string.scale_mode_b_to_a) else getString(R.string.scale_mode_a_to_b)
+            updateCompositeView()
+        }
+
+        findViewById<Button>(R.id.btnSave).setOnClickListener {
+            saveCurrentComposite()
+        }
+    }
+
+    private fun setupEdgeToEdge() {
+        val mainLayout = findViewById<ScrollView>(R.id.main_layout)
+        ViewCompat.setOnApplyWindowInsetsListener(mainLayout) { view, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
+            view.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
             insets
         }
+    }
 
-        tvLocation = findViewById(R.id.tvLocation)
-        tvSatDetails = findViewById(R.id.tvSatDetails)
+    /**
+     * 三层合成引擎：静态背景 -> 图层 B -> 图层 A
+     */
+    private fun updateCompositeView() {
+        val layerA = if (isA_BackgroundActive) layerA_Background else layerA_Cropped
+        val layerB = layerB_Direct
+        val bgLayer = layer_StaticBackground
 
-        val permissionsToRequest = basePermissions.filter {
-            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
-        }.toTypedArray()
+        if (layerA == null && layerB == null && bgLayer == null) return
 
-        if (permissionsToRequest.isNotEmpty()) {
-            Toast.makeText(this, "正在请求全量外设权限...", Toast.LENGTH_SHORT).show()
-            ActivityCompat.requestPermissions(this, permissionsToRequest, allPermissionsRequestCode)
+        // 确定基准尺寸
+        val targetWidth: Int
+        val targetHeight: Int
+        
+        if (isScaleBToA) {
+            targetWidth = layerA?.width ?: layerB?.width ?: bgLayer?.width ?: 1
+            targetHeight = layerA?.height ?: layerB?.height ?: bgLayer?.height ?: 1
         } else {
-            Toast.makeText(this, "所有权限已就绪", Toast.LENGTH_SHORT).show()
-            initGps()
+            targetWidth = bgLayer?.width ?: layerB?.width ?: layerA?.width ?: 1
+            targetHeight = bgLayer?.height ?: layerB?.height ?: layerA?.height ?: 1
+        }
+
+        // 画布复用
+        if (compositeBitmap == null || compositeBitmap?.width != targetWidth || compositeBitmap?.height != targetHeight) {
+            compositeBitmap?.recycle()
+            compositeBitmap = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
+        }
+
+        val canvas = Canvas(compositeBitmap!!)
+        canvas.drawColor(Color.WHITE)
+
+        val destRect = RectF(0f, 0f, targetWidth.toFloat(), targetHeight.toFloat())
+
+        // 1. 绘制绝对底层：静态背景
+        bgLayer?.let { canvas.drawBitmap(it, null, destRect, filterPaint) }
+
+        // 2. 绘制中间层与顶层 (根据 A/B 适配逻辑)
+        if (isScaleBToA) {
+            // B 适配 A
+            layerB?.let { canvas.drawBitmap(it, null, destRect, filterPaint) }
+            layerA?.let { canvas.drawBitmap(it, 0f, 0f, filterPaint) }
+        } else {
+            // A 适配 B (此处 A/B 均适配基准尺寸，逻辑保持一致)
+            layerB?.let { canvas.drawBitmap(it, null, destRect, filterPaint) }
+            layerA?.let { canvas.drawBitmap(it, null, destRect, filterPaint) }
+        }
+
+        ivResult.setImageBitmap(compositeBitmap)
+        updateImageInfo(compositeBitmap!!)
+    }
+
+    private fun updateImageInfo(bitmap: Bitmap) {
+        val width = bitmap.width
+        val height = bitmap.height
+        val byteCount = bitmap.allocationByteCount.toDouble()
+        val mbSize = byteCount / (1024 * 1024)
+        val format = bitmap.config?.name ?: "ARGB_8888"
+
+        tvImageInfo.text = getString(R.string.image_info_template, width, height, mbSize, format)
+    }
+
+    private fun startAdvancedCropper(uri: Uri) {
+        val options = CropImageOptions(
+            guidelines = CropImageView.Guidelines.ON,
+            activityTitle = getString(R.string.activity_title_crop_a),
+            toolbarColor = Color.parseColor("#6200EE"),
+            activityMenuIconColor = Color.WHITE,
+            outputCompressFormat = Bitmap.CompressFormat.PNG
+        )
+        cropImageA.launch(CropImageContractOptions(uri = uri, cropImageOptions = options))
+    }
+
+    private fun extractFullSizeCroppedLayer(source: Bitmap, cropRect: Rect): Bitmap {
+        val fullBitmap = Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(fullBitmap)
+        canvas.drawBitmap(source, cropRect, cropRect, filterPaint)
+        return fullBitmap
+    }
+
+    private fun extractBackgroundLayer(source: Bitmap, cropRect: Rect): Bitmap {
+        val bgBitmap = source.copy(Bitmap.Config.ARGB_8888, true)
+        val canvas = Canvas(bgBitmap)
+        canvas.drawRect(cropRect, clearPaint)
+        return bgBitmap
+    }
+
+    private fun saveCurrentComposite() {
+        val bitmap = compositeBitmap ?: return
+        val filename = "Composite_${System.currentTimeMillis()}.png"
+        val contentValues = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
+            put(MediaStore.MediaColumns.MIME_TYPE, "image/png")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/MyApplication")
+            }
+        }
+
+        val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+        uri?.let { 
+            try {
+                val outputStream: OutputStream? = contentResolver.openOutputStream(it)
+                outputStream?.use { stream ->
+                    bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
+                    showToast(getString(R.string.toast_save_success))
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                showToast(getString(R.string.toast_save_error, e.message ?: "Unknown"))
+            }
         }
     }
 
-    @SuppressLint("SetTextI18n")
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-
-        if (requestCode == allPermissionsRequestCode) {
-            val deniedPermissions = mutableListOf<String>()
-
-            // 遍历查找哪些权限被拒绝了
-            for (i in permissions.indices) {
-                if (grantResults[i] != PackageManager.PERMISSION_GRANTED) {
-                    // 只截取权限字符串的最后一部分以方便阅读，例如把 android.permission.CAMERA 变成 CAMERA
-                    deniedPermissions.add(permissions[i].substringAfterLast("."))
-                }
+    private fun loadBitmapFromUri(uri: Uri): Bitmap? {
+        return try {
+            val source = ImageDecoder.createSource(contentResolver, uri)
+            ImageDecoder.decodeBitmap(source) { decoder, _, _ ->
+                decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                decoder.isMutableRequired = true
             }
-
-            if (deniedPermissions.isEmpty()) {
-                Toast.makeText(this, "牛逼！全部权限均已授权！", Toast.LENGTH_LONG).show()
-            } else {
-                // 在屏幕上提示失败的权限
-                val failMsg = "以下权限被系统或用户拒绝:\n${deniedPermissions.joinToString(", ")}\n\n"
-                tvSatDetails.text = failMsg
-                Toast.makeText(this, "部分权限获取失败", Toast.LENGTH_LONG).show()
-            }
-            // 无论如何，尝试初始化GPS
-            initGps()
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
         }
     }
 
-    // 辅助函数：将系统的星座常量转换为人类可读的字符串
-    private fun getConstellationName(type: Int): String {
-        return when (type) {
-            GnssStatus.CONSTELLATION_GPS -> "GPS (美国)"
-            GnssStatus.CONSTELLATION_BEIDOU -> "北斗 (中国)"
-            GnssStatus.CONSTELLATION_GLONASS -> "GLONASS (俄罗斯)"
-            GnssStatus.CONSTELLATION_GALILEO -> "Galileo (欧洲)"
-            GnssStatus.CONSTELLATION_QZSS -> "QZSS (日本)"
-            GnssStatus.CONSTELLATION_IRNSS -> "IRNSS (印度)"
-            GnssStatus.CONSTELLATION_SBAS -> "SBAS (星基增强)"
-            else -> "未知星座 ($type)"
-        }
+    private fun releaseLayerA() {
+        layerA_Cropped?.recycle()
+        layerA_Background?.recycle()
+        layerA_Cropped = null
+        layerA_Background = null
     }
 
-    @SuppressLint("SetTextI18n", "MissingPermission")
-    private fun initGps() {
-        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-            tvSatDetails.append("\n致命错误：未获得 ACCESS_FINE_LOCATION 权限，无法读取硬件 GPS 寄存器。")
-            return
-        }
+    private fun showToast(message: String) {
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+    }
 
-        locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
-
-        val locationListener = object : LocationListener {
-            override fun onLocationChanged(location: Location) {
-                tvLocation.text = String.format(Locale.getDefault(), "GPS坐标: %.6f, %.6f | 精度: %.1fm", location.latitude, location.longitude, location.accuracy)
-            }
-        }
-
-        locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, locationListener)
-
-        val gnssStatusCallback = object : GnssStatus.Callback() {
-            override fun onSatelliteStatusChanged(status: GnssStatus) {
-                val details = java.lang.StringBuilder()
-
-                // 保留之前的错误提示（如果有的话）
-                if (tvSatDetails.text.toString().contains("拒绝")) {
-                    details.append(tvSatDetails.text.toString().substringBefore("\n\n") + "\n\n")
-                }
-
-                for (i in 0 until status.satelliteCount) {
-                    // 获取属于哪个卫星系统
-                    val sysName = getConstellationName(status.getConstellationType(i))
-                    val svid = status.getSvid(i)
-                    val cn0 = status.getCn0DbHz(i)
-                    val ele = status.getElevationDegrees(i)
-                    val azi = status.getAzimuthDegrees(i)
-
-                    // 获取星历和历书状态
-                    val hasAlm = if (status.hasAlmanacData(i)) "有" else "无"
-                    val hasEph = if (status.hasEphemerisData(i)) "有" else "无"
-                    val inFix = if (status.usedInFix(i)) "[参与定位]" else "[仅可见]"
-
-                    // 获取载波频率 (部分老旧手机可能不支持读取频率，会返回 false)
-                    val freq = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && status.hasCarrierFrequencyHz(i)) {
-                        String.format(Locale.getDefault(), "%.2f MHz", status.getCarrierFrequencyHz(i) / 1000000.0f)
-                    } else {
-                        "未知"
-                    }
-
-                    // 绘制类似终端树状图的详细信息
-                    details.append("[$sysName] ID:$svid $inFix\n")
-                    details.append(" ├ 信号(C/N0): ${cn0}dB | 频率: $freq\n")
-                    details.append(" ├ 仰角: $ele° | 方位角: $azi°\n")
-                    details.append(" └ 星历: $hasEph | 历书: $hasAlm\n")
-                    details.append("---------------------------------\n")
-                }
-                tvSatDetails.text = details.toString()
-            }
-        }
-
-        locationManager.registerGnssStatusCallback(ContextCompat.getMainExecutor(this), gnssStatusCallback)
+    override fun onDestroy() {
+        super.onDestroy()
+        releaseLayerA()
+        layerB_Direct?.recycle()
+        layer_StaticBackground?.recycle()
+        compositeBitmap?.recycle()
     }
 }

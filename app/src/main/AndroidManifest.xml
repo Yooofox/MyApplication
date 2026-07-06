@@ -47,6 +47,13 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- 注册裁切 Activity，并应用我们自定义的强力可见主题 -->
+        <activity
+            android:name="com.canhub.cropper.CropImageActivity"
+            android:theme="@style/Theme.CustomCropper"
+            android:exported="true" />
+
     </application>
 
 </manifest>

@@ -1,3 +1,21 @@
 <resources>
-    <string name="app_name">My Application</string>
+    <string name="app_name">高性能图片合成器</string>
+    <string name="title_main">高性能图片合成器</string>
+    <string name="layer_a_title">图层 A (底层控制)</string>
+    <string name="btn_select_image_a">1. 选择并裁切 A</string>
+    <string name="btn_set_background">背景设置</string>
+    <string name="btn_layer_a_cropped">A: 裁切层</string>
+    <string name="btn_layer_a_background">A: 背景层</string>
+    <string name="layer_b_title">图层 B (顶层直加载)</string>
+    <string name="btn_select_image_b">2. 直接加载图片 B</string>
+    <string name="btn_save_composite">3. 保存当前合成图片</string>
+    <string name="desc_result_image">合成结果展示区</string>
+    <string name="scale_mode_b_to_a">尺寸对齐：B 适配 A</string>
+    <string name="scale_mode_a_to_b">尺寸对齐：A 适配 B</string>
+    <string name="image_info_template">尺寸: %1$d x %2$d | 占用: %3$.2f MB | 格式: %4$s</string>
+    <string name="toast_layer_a_ready">图层 A 就绪</string>
+    <string name="toast_layer_b_ready">图片 B 已直接加载</string>
+    <string name="toast_save_success">保存成功！</string>
+    <string name="toast_save_error">保存错误: %1$s</string>
+    <string name="activity_title_crop_a">裁切图层 A</string>
 </resources>

@@ -6,4 +6,11 @@
     </style>
 
     <style name="Theme.MyApplication" parent="Base.Theme.MyApplication" />
+
+    <!-- 专门为裁切 Activity 准备的主题，确保其 ActionBar 可见且图标颜色正常 -->
+    <style name="Theme.CustomCropper" parent="Theme.AppCompat.DayNight.DarkActionBar">
+        <item name="colorPrimary">#6200EE</item>
+        <item name="colorPrimaryDark">#3700B3</item>
+        <item name="colorAccent">#03DAC5</item>
+    </style>
 </resources>
